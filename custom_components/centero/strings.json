@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Centero",
+        "description": "Enter the IP address of the Centero gateway.",
+        "data": {
+          "host": "IP address"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the gateway"
+    },
+    "abort": {
+      "already_configured": "This gateway is already configured"
+    }
+  }
+}

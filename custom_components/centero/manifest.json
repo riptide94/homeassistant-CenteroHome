@@ -1,0 +1,9 @@
+{
+  "domain": "centero",
+  "name": "Centero",
+  "version": "0.0.3",
+  "config_flow": true,
+  "iot_class": "local_polling",
+  "integration_type": "hub",
+  "codeowners": ["@riptide94"]
+}

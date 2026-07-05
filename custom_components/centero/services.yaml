@@ -1,0 +1,11 @@
+vent:
+  target:
+    entity:
+      integration: centero
+      domain: cover
+
+favorite:
+  target:
+    entity:
+      integration: centero
+      domain: cover
