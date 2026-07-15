@@ -4,8 +4,6 @@ from typing import Any
 
 from homeassistant.components.cover import CoverEntity, CoverEntityFeature
 from homeassistant.config_entries import ConfigEntry
-
-# from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -13,19 +11,29 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CLOSING_STATES,
     COMMAND_DOWN,
+    COMMAND_DOWN_SILENT,
     COMMAND_FAVORITE,
     COMMAND_STOP,
     COMMAND_UP,
+    COMMAND_UP_SILENT,
     COMMAND_VENT,
     DOMAIN,
+    ERROR_STATES,
     LOGGER,
+    MOVING_STATES,
+    OPENING_STATES,
+    PRESET_STATES,
+    STATE_BOTTOM_INTERMEDIATE,
     STATE_CLOSED,
     STATE_CLOSING,
+    STATE_NAMES,
     STATE_OPEN,
     STATE_OPENING,
     STATE_PARTIAL,
-    # STATE_VENTING,
+    STATE_TOP_TILT,
+    KNOWN_STATES,
 )
 from .coordinator import CenteroCoordinator
 
@@ -136,15 +144,13 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         state = device["state"]
 
-        if state == STATE_CLOSED:
+        if state in (STATE_CLOSED, STATE_BOTTOM_INTERMEDIATE):
             return True
 
-        if state in (
-            STATE_OPEN,
-            STATE_PARTIAL,
-            STATE_OPENING,
-            STATE_CLOSING,
-            # STATE_VENTING,
+        if (
+            state in (STATE_OPEN, STATE_PARTIAL, STATE_TOP_TILT)
+            or state in MOVING_STATES
+            or state in PRESET_STATES
         ):
             return False
 
@@ -156,11 +162,19 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         device = self._device_data
 
-        return device is not None and device["state"] == STATE_OPENING
+        return device is not None and device["state"] in OPENING_STATES
 
     @property
     def current_cover_position(self):
         """Return the current position of the cover."""
+
+        calc = self.coordinator.get_travel_calculator(self._adr)
+
+        if calc.is_configured:
+            position = calc.current_position()
+
+            if position is not None:
+                return round(position)
 
         device = self._device_data
 
@@ -169,10 +183,10 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         state = device["state"]
 
-        if state == STATE_OPEN:
+        if state in (STATE_OPEN, STATE_TOP_TILT):
             return 100
 
-        if state == STATE_CLOSED:
+        if state in (STATE_CLOSED, STATE_BOTTOM_INTERMEDIATE):
             return 0
 
         if state == STATE_PARTIAL:
@@ -186,7 +200,7 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         device = self._device_data
 
-        return device is not None and device["state"] == STATE_CLOSING
+        return device is not None and device["state"] in CLOSING_STATES
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -203,35 +217,35 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         state = device["state"]
 
+        calc = self.coordinator.get_travel_calculator(self._adr)
+
         return {
             "sid": self._sid,
             "adr": self._adr,
             "centero_state": state,
-            "known_state": state
-            in {
-                STATE_OPEN,
-                STATE_CLOSED,
-                STATE_PARTIAL,
-                STATE_OPENING,
-                STATE_CLOSING,
-                # STATE_VENTING,
-            },
+            "centero_state_name": STATE_NAMES.get(state, "unknown"),
+            "known_state": state in KNOWN_STATES,
+            "error_state": state in ERROR_STATES,
             "available_from_gateway": True,
             "fast_polling": bool(self.coordinator._moving_devices),
+            "position_source": "time_based" if calc.is_configured else "discrete",
         }
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
 
+        silent = self.coordinator.is_silent_drive(self._adr)
+
         LOGGER.debug(
-            "Opening cover SID=%s ADR=%s",
+            "Opening cover SID=%s ADR=%s (silent=%s)",
             self._sid,
             self._adr,
+            silent,
         )
 
         await self.coordinator.api.send_command(
             self._adr,
-            COMMAND_UP,
+            COMMAND_UP_SILENT if silent else COMMAND_UP,
         )
 
         self.coordinator.set_optimistic_state(
@@ -244,15 +258,18 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
 
+        silent = self.coordinator.is_silent_drive(self._adr)
+
         LOGGER.debug(
-            "Closing cover SID=%s ADR=%s",
+            "Closing cover SID=%s ADR=%s (silent=%s)",
             self._sid,
             self._adr,
+            silent,
         )
 
         await self.coordinator.api.send_command(
             self._adr,
-            COMMAND_DOWN,
+            COMMAND_DOWN_SILENT if silent else COMMAND_DOWN,
         )
 
         self.coordinator.set_optimistic_state(
@@ -276,57 +293,66 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
             COMMAND_STOP,
         )
 
-        #
-        # We don't know the resulting position yet.
-        #
         self.coordinator.clear_optimistic_state(
+            self._adr,
+        )
+
+        #
+        # Freeze the time-based estimate at wherever it has reached.
+        #
+        self.coordinator.stop_travel(
             self._adr,
         )
 
         await self.coordinator.async_request_refresh()
 
+    async def async_vent_cover(self) -> None:
+        """Move the cover to the vent position."""
 
-async def async_vent_cover(self) -> None:
-    """Move the cover to the vent position."""
+        LOGGER.debug(
+            "Moving cover SID=%s ADR=%s to vent position",
+            self._sid,
+            self._adr,
+        )
 
-    LOGGER.debug(
-        "Moving cover SID=%s ADR=%s to vent position",
-        self._sid,
-        self._adr,
-    )
+        await self.coordinator.api.send_command(
+            self._adr,
+            COMMAND_VENT,
+        )
 
-    await self.coordinator.api.send_command(
-        self._adr,
-        COMMAND_VENT,
-    )
+        #
+        # The vent preset position is unknown to us; the gateway will
+        # report STATE_VENT (1004) once the cover arrives there.
+        #
+        self.coordinator.invalidate_travel(
+            self._adr,
+        )
 
-    # self.coordinator.set_optimistic_state(
-    #     self._adr,
-    #     STATE_VENTING,
-    # )
+        await self.coordinator.async_request_refresh()
 
-    await self.coordinator.async_request_refresh()
+    async def async_favorite_cover(self) -> None:
+        """Move the cover to the favorite position."""
 
+        LOGGER.debug(
+            "Moving cover SID=%s ADR=%s to favorite position",
+            self._sid,
+            self._adr,
+        )
 
-async def async_favorite_cover(self) -> None:
-    """Move the cover to the favorite position."""
+        await self.coordinator.api.send_command(
+            self._adr,
+            COMMAND_FAVORITE,
+        )
 
-    LOGGER.debug(
-        "Moving cover SID=%s ADR=%s to favorite position",
-        self._sid,
-        self._adr,
-    )
+        #
+        # We don't know the resulting state or position.
+        #
+        self.coordinator.clear_optimistic_state(
+            self._adr,
+        )
 
-    await self.coordinator.api.send_command(
-        self._adr,
-        COMMAND_FAVORITE,
-    )
+        self.coordinator.invalidate_travel(
+            self._adr,
+        )
 
-    #
-    # We don't know the resulting state.
-    #
-    self.coordinator.clear_optimistic_state(
-        self._adr,
-    )
-
-    await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_refresh()

@@ -46,12 +46,30 @@ class CenteroAPI:
         return await self._get("info")
 
     async def get_states(self) -> dict:
-        """Fetch all device states."""
+        """Fetch all device states as cached by the gateway."""
 
         return await self._get(
             "cmd",
             params={
                 "XC_FNC": "GetStates",
+            },
+        )
+
+    async def refresh_state(self, address: str) -> dict:
+        """Make the gateway radio-query a single blind and return its state.
+
+        Unlike get_states, this reflects movements the gateway did not
+        initiate itself (e.g. via a physical remote). The radio round
+        trip is typically fast (measured <150ms total), but the elero
+        protocol only guarantees an answer within 4 seconds.
+        """
+
+        return await self._get(
+            "cmd",
+            params={
+                "XC_FNC": "RefreshSC",
+                "type": "ER",
+                "adr": address,
             },
         )
 

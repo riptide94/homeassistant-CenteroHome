@@ -1,14 +1,30 @@
 # Centero Home Assistant Integration
 
-Home Assistant integration for Elero Centero gateways.
+Home Assistant integration for Elero covers managed through a Centero Home
+gateway.
 
 ## Features
 
-- Automatic discovery of Elero covers
-- Open / Close / Stop
-- Services for 
+- Automatic discovery of Elero covers connected to the gateway
+- Cover control: open / close / stop
+- Services for
   - Vent position
   - Favorite position
+- Position estimation based on movement time
+  - The gateway only reports open / closed / partially open; the
+    integration estimates the exact position from how long a cover has
+    been moving
+  - Configured per cover through two `number` entities ("Open time" and
+    "Close time"), adjustable at runtime without a restart and restored
+    after restarts
+  - The estimate re-calibrates automatically whenever the gateway confirms
+    a fully open or fully closed position
+- Detection of externally triggered movements
+  - Covers moved via physical remotes are invisible to the gateway on its
+    own; the integration actively radio-queries one cover per update cycle
+    to pick these movements up
+- "Silent drive" for cover movements where the motor supports it. 
+- Adaptive polling: 5 s when idle, 1 s while covers are moving
 
 ## Installation
 
@@ -20,12 +36,39 @@ Home Assistant integration for Elero Centero gateways.
 4. Install.
 5. Restart Home Assistant.
 6. Add the integration via Settings → Devices & Services.
-7. Enter the IP address of your Centero Home Gateway
+7. Enter the IP address of your Centero Home Gateway.
+
+## Configuration
+
+Each cover exposes multiple configuration entities on its device page.
+
+- `number` entities 
+  - **Open time** - seconds the cover needs from fully closed to fully open
+  - **Close time** - seconds the cover needs from fully open to fully closed
+
+> Measure both once (they usually differ) and enter the values. Position
+> estimation stays disabled until both values are set; the cover then still
+> works with the coarse open / closed / partial reporting.
+
+- `switch` entities
+  - **Silent drive** - tells the integration to send the "silent drive" commands to the motor for this cover, which means the cover will move slower and therfore make less noise.
+
+> Enabling this for a drive that does not support "silent drive" has no effect.
+
+> [!NOTE]
+> Covers that do support "silent drive" will always use it when the `vent` or `favorite` services are used on them.
 
 ## Supported hardware
 
 The integration was tested with the following hardware:
 
 - CenteroHome E6 (v1.1.32)
+- [Elero RolTop-M-868](https://www.elero.com/en/products/electrical-drives/roltop-m-868)
+- [Elero RolMotion M-868](https://www.elero.com/en/products/electrical-drives/rolmotion-m-868)
 
 Other versions of the gateway may work too but were not tested.
+
+## Documentation
+
+Reverse-engineered knowledge about the gateway API and the elero radio
+protocol is documented in [doc/elero-api-knowledge.md](doc/elero-api-knowledge.md).

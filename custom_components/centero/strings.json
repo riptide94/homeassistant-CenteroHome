@@ -15,5 +15,20 @@
     "abort": {
       "already_configured": "This gateway is already configured"
     }
+  },
+  "entity": {
+    "number": {
+      "open_time": {
+        "name": "Open time"
+      },
+      "close_time": {
+        "name": "Close time"
+      }
+    },
+    "switch": {
+      "silent_drive": {
+        "name": "Silent drive"
+      }
+    }
   }
 }

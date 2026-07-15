@@ -1,3 +1,18 @@
 {
-  "title": "Centero"
+  "title": "Centero",
+  "entity": {
+    "number": {
+      "open_time": {
+        "name": "Open time"
+      },
+      "close_time": {
+        "name": "Close time"
+      }
+    },
+    "switch": {
+      "silent_drive": {
+        "name": "Silent drive"
+      }
+    }
+  }
 }
