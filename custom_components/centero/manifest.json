@@ -1,9 +1,11 @@
 {
   "domain": "centero",
   "name": "Centero",
-  "version": "0.2.1",
+  "codeowners": ["@riptide94"],
   "config_flow": true,
-  "iot_class": "local_polling",
+  "documentation": "https://github.com/riptide94/homeassistant-CenteroHome",
   "integration_type": "hub",
-  "codeowners": ["@riptide94"]
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/riptide94/homeassistant-CenteroHome/issues",
+  "version": "0.2.1"
 }
