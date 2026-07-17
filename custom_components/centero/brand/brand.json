@@ -1,0 +1,9 @@
+{
+  "name": "Centero",
+  "domain": "centero",
+  "codeowners": [
+    "@riptide94"
+  ],
+  "documentation": "https://github.com/riptide94/homeassistant-CenteroHome",
+  "iot_class": "local_polling"
+}
