@@ -23,6 +23,12 @@
       },
       "close_time": {
         "name": "Close time"
+      },
+      "favorite_position": {
+        "name": "Favorite position"
+      },
+      "vent_position": {
+        "name": "Vent position"
       }
     },
     "switch": {

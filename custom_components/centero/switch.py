@@ -61,6 +61,13 @@ class CenteroSilentDriveSwitch(
         self._cover_unique_id = cover_unique
         self._attr_unique_id = f"{cover_unique}_silent_drive"
 
+        #
+        # Suggest a deterministic entity id; deriving it from the
+        # translated name silently degrades to the bare device name
+        # when the translation is not available at registration.
+        #
+        self.entity_id = f"switch.{cover_unique}_silent_drive"
+
         self._attr_is_on = False
 
     @property

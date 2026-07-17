@@ -10,8 +10,8 @@ elero status byte.
 | `1000` | no information                                      | position unknown               |
 | `1001` | top position stop                                   | open, position 100             |
 | `1002` | bottom position stop                                | closed, position 0             |
-| `1003` | intermediate position stop (favorite preset)        | stationary, position unknown   |
-| `1004` | tilt / ventilation position stop (vent preset)      | stationary, position unknown   |
+| `1003` | intermediate position stop (favorite preset)        | stationary; configured "Favorite position", else tracked estimate, else 50 % |
+| `1004` | tilt / ventilation position stop (vent preset)      | stationary; configured "Vent position", else tracked estimate, else 50 %     |
 | `1005` | blocking detected                                   | error, keeps last position     |
 | `1006` | motor overheated                                    | error, keeps last position     |
 | `1007` | timeout / motor did not answer                      | error, keeps last position     |

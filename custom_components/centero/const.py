@@ -18,6 +18,16 @@ TRAVEL_TIME_MIN = 1
 TRAVEL_TIME_MAX = 300
 TRAVEL_TIME_STEP = 0.5
 
+PRESET_POSITION_MIN = 0
+PRESET_POSITION_MAX = 100
+PRESET_POSITION_STEP = 1
+
+#
+# Reported position for a preset state when the user has not
+# configured the preset's position and no tracked estimate exists.
+#
+PRESET_POSITION_DEFAULT = 50
+
 #
 # After we command a stop, the gateway keeps reporting the old
 # moving state for a short while. Ignore those stale reports so
@@ -53,7 +63,9 @@ CLOSING_STATES = {STATE_START_CLOSING, STATE_CLOSING}
 MOVING_STATES = OPENING_STATES | CLOSING_STATES
 
 #
-# Stationary at a user-defined preset whose exact position we cannot know.
+# Stationary at a user-defined preset. The gateway never reports where
+# the preset lies; the user can configure it per cover via the
+# "Favorite position" / "Vent position" number entities.
 #
 PRESET_STATES = {STATE_INTERMEDIATE, STATE_VENT}
 

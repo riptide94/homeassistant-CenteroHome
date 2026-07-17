@@ -13,6 +13,7 @@ from .const import (
     MOVING_STATES,
     OPENING_STATES,
     POLL_INTERVAL,
+    PRESET_POSITION_DEFAULT,
     PRESET_STATES,
     STATE_BOTTOM_INTERMEDIATE,
     STATE_CLOSED,
@@ -87,6 +88,14 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # Key: adr
         #
         self._silent_drive: dict[str, bool] = {}
+
+        #
+        # User-configured positions of the motor-programmed presets,
+        # set via the "Favorite position" / "Vent position" numbers.
+        #
+        # Key: adr, then preset state (STATE_INTERMEDIATE / STATE_VENT)
+        #
+        self._preset_positions: dict[str, dict[str, float]] = {}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch data from the gateway."""
@@ -305,9 +314,17 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             elif state in PRESET_STATES:
                 #
                 # The cover sits at a user-defined preset (favorite or
-                # vent) whose actual position we cannot know.
+                # vent). A user-configured preset position is the best
+                # truth; otherwise keep the estimate tracked during the
+                # move there, and only fall back to the flat guess when
+                # no estimate exists at all.
                 #
-                calc.invalidate()
+                configured = self.configured_preset_position(adr, state)
+
+                if configured is not None:
+                    calc.set_position(configured)
+                elif calc.position is None:
+                    calc.set_position(PRESET_POSITION_DEFAULT)
             elif state == STATE_PARTIAL:
                 #
                 # Only fall back to the flat guess when we have no
@@ -386,6 +403,34 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         return self._silent_drive.get(adr, False)
 
+    def set_preset_position(self, adr: str, state: str, position: float) -> None:
+        """Set the configured position of a preset state for a device."""
+
+        self._preset_positions.setdefault(adr, {})[state] = position
+
+        #
+        # If the cover currently sits at this preset, apply the value
+        # right away instead of waiting for the next poll. This also
+        # covers startup, where the first refresh runs before the
+        # number entities have restored their values.
+        #
+        device = (self.data or {}).get(adr)
+
+        if device is not None and device["state"] == state:
+            self.get_travel_calculator(adr).set_position(position)
+
+            self.async_update_listeners()
+
+    def configured_preset_position(self, adr: str, state: str) -> int | None:
+        """Return the configured position of a preset state, if any."""
+
+        position = self._preset_positions.get(adr, {}).get(state)
+
+        if position is None:
+            return None
+
+        return round(position)
+
     def get_travel_calculator(self, adr: str) -> TravelCalculator:
         """Return the travel calculator for a device, creating it if needed."""
 
@@ -400,17 +445,6 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.get_travel_calculator(adr).stop()
 
         self._travel_stop_times[adr] = time.monotonic()
-
-        self.async_update_listeners()
-
-    def invalidate_travel(self, adr: str) -> None:
-        """Mark the position estimate for a device as unknown.
-
-        Used when a cover is sent to a position we cannot predict,
-        such as a favorite or vent preset.
-        """
-
-        self.get_travel_calculator(adr).invalidate()
 
         self.async_update_listeners()
 

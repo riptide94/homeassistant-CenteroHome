@@ -24,6 +24,7 @@ from .const import (
     LOGGER,
     MOVING_STATES,
     OPENING_STATES,
+    PRESET_POSITION_DEFAULT,
     PRESET_STATES,
     STATE_BOTTOM_INTERMEDIATE,
     STATE_CLOSED,
@@ -93,12 +94,14 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
         self._attr_unique_id = unique
         self._attr_translation_key = "cover"
 
-        #
-        # Entity name:
-        #
-        # cover.elero_sid01_adr03
-        #
         self._attr_name = f"Elero SID{self._sid} ADR{self._adr}"
+
+        #
+        # Suggest a deterministic entity id; deriving it from the name
+        # would duplicate the device name (which is the same as the
+        # entity name) into cover.elero_sid01_adr03_elero_sid01_adr03.
+        #
+        self.entity_id = f"cover.{unique}"
 
         self._attr_supported_features = (
             CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
@@ -188,6 +191,17 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         if state in (STATE_CLOSED, STATE_BOTTOM_INTERMEDIATE):
             return 0
+
+        if state in PRESET_STATES:
+            configured = self.coordinator.configured_preset_position(
+                self._adr,
+                state,
+            )
+
+            if configured is not None:
+                return configured
+
+            return PRESET_POSITION_DEFAULT
 
         if state == STATE_PARTIAL:
             return 50
@@ -321,13 +335,13 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
         )
 
         #
-        # The vent preset position is unknown to us; the gateway will
-        # report STATE_VENT (1004) once the cover arrives there.
+        # We don't know which way the preset lies, but the gateway
+        # reports the movement direction on the next polls, so the
+        # position estimate keeps tracking through the transit. Once
+        # STATE_VENT (1004) is reported, the reconcile pass resolves
+        # the final position (configured value, tracked estimate, or
+        # the 50% fallback).
         #
-        self.coordinator.invalidate_travel(
-            self._adr,
-        )
-
         await self.coordinator.async_request_refresh()
 
     async def async_favorite_cover(self) -> None:
@@ -345,13 +359,14 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
         )
 
         #
-        # We don't know the resulting state or position.
+        # We don't know the resulting state or movement direction, so
+        # no optimistic override; the gateway reports the direction on
+        # the next polls and the position estimate keeps tracking.
+        # Once STATE_INTERMEDIATE (1003) is reported, the reconcile
+        # pass resolves the final position (configured value, tracked
+        # estimate, or the 50% fallback).
         #
         self.coordinator.clear_optimistic_state(
-            self._adr,
-        )
-
-        self.coordinator.invalidate_travel(
             self._adr,
         )
 

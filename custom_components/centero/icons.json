@@ -1,23 +1,22 @@
 {
-  "title": "Centero",
   "entity": {
     "number": {
       "open_time": {
-        "name": "Open time"
+        "default": "mdi:clock-out"
       },
       "close_time": {
-        "name": "Close time"
+        "default": "mdi:clock-in"
       },
       "favorite_position": {
-        "name": "Favorite position"
+        "default": "mdi:star"
       },
       "vent_position": {
-        "name": "Vent position"
+        "default": "mdi:fan"
       }
     },
     "switch": {
       "silent_drive": {
-        "name": "Silent drive"
+        "default": "mdi:volume-mute"
       }
     }
   }
