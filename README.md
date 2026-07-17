@@ -39,13 +39,15 @@ gateway.
 
 ### HACS
 
-1. Open HACS.
-2. Add this repository as a custom repository.
-3. Select category "Integration".
-4. Install.
-5. Restart Home Assistant.
-6. Add the integration via Settings → Devices & Services.
-7. Enter the IP address of your Centero Home Gateway.
+1. Add this repository as a custom repository in HACS by clicking the button below.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=riptide94&repository=homeassistant-CenteroHome&category=integration)
+
+2. Select category "Integration".
+3. Install.
+4. Restart Home Assistant.
+5. Add the integration via Settings → Devices & Services.
+6. Enter the IP address of your Centero Home Gateway.
+7. Done - the integration automatically detects your covers and will add them as devices.
 
 ## Configuration
 
