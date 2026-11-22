@@ -5,28 +5,34 @@ gateway.
 
 > [!IMPORTANT]
 > **This project is not affiliated with, endorsed by, or officially supported by Elero.**
-> It is an independent, community-driven integration developed to work with Elero equipment through the Centero Home gateway.
+> It is an independent integration developed to work with Elero equipment through the Centero Home gateway.
 > Elero and all related product names are trademarks of their respective owners.
 
 ## Features
 
 - Automatic discovery of Elero covers connected to the gateway
-- Cover control: open / close / stop
+- Cover control: open / close / stop / move to position
 - Services for
-  - Vent position
-  - Favorite position
+  - Move to saved vent position
+  - Move to saved favorite position
 - Position estimation based on movement time
   - The gateway only reports open / closed / partially open; the
     integration estimates the exact position from how long a cover has
     been moving
-  - Configured per cover through two `number` entities ("Open time" and
-    "Close time"), adjustable at runtime without a restart and restored
+  - Configured per cover through two `number` entities ("Time open" and
+    "Time close"), adjustable at runtime without a restart and restored
     after restarts
   - The estimate re-calibrates automatically whenever the gateway confirms
     a fully open or fully closed position
+  - Once both drive times are set, covers also gain go-to-position support
+    (`cover.set_cover_position` and the position slider). The gateway has
+    no native positioning command, so the integration starts the motor and
+    issues a timed stop when the estimate reaches the target; targets of
+    0 % / 100 % always drive fully to the end stops and re-calibrate the
+    estimate
   - Covers stopped at the motor's favorite or vent preset report the
-    position configured through the per-cover "Favorite position" /
-    "Vent position" `number` entities (or the tracked estimate / a 50 %
+    position configured through the per-cover "Position favorite" /
+    "Position vent" `number` entities (or the tracked estimate / a 50 %
     fallback when unset) instead of an unknown position
 - Detection of externally triggered movements
   - Covers moved via physical remotes are invisible to the gateway on its
@@ -54,14 +60,19 @@ gateway.
 Each cover exposes multiple configuration entities on its device page.
 
 - `number` entities 
-  - **Open time** - seconds the cover needs from fully closed to fully open
-  - **Close time** - seconds the cover needs from fully open to fully closed
+  - **Time open** - seconds the cover needs from fully closed to fully open
+  - **Time close** - seconds the cover needs from fully open to fully closed
 
 > Measure both once (they usually differ) and enter the values. Position
-> estimation stays disabled until both values are set; the cover then still
-> works with the coarse open / closed / partial reporting.
+> estimation stays disabled until both values are set, as is go-to-position
+> support (the position slider only appears once both times are set); the
+> cover then still works with the coarse open / closed / partial reporting.
 
-  - **Favorite position** / **Vent position** - where the motor's favorite
+> [!NOTE]
+> A timed positioning run does not survive a Home Assistant restart: the
+> cover finishes at its end stop and the estimate re-calibrates there.
+
+  - **Position favorite** / **Position vent** - where the motor's favorite
     (intermediate) and vent (tilt) presets sit, in % open (100 = fully
     open). When the gateway reports that a cover stopped at one of these
     presets, the integration reports the configured value as the current
@@ -79,6 +90,23 @@ Each cover exposes multiple configuration entities on its device page.
 
 > [!NOTE]
 > Covers that do support "silent drive" will always use it when the `vent` or `favorite` services are used on them.
+
+> [!NOTE]
+> Timed positioning uses the silent commands too, and silent drive moves
+> slower. If you use silent drive, measure **Time open** / **Time close**
+> with it enabled - otherwise position estimates and timed stops will be
+> off.
+
+## Diagnostic Entities
+
+Each cover also exposes two `sensor` entities reflecting the raw status last
+received from the gateway. They are disabled by default since they are
+mainly intended for debugging; enable them from the entity's settings on the
+device page if you need them.
+
+- **State Code** - the raw state code reported by the gateway (e.g. `100A`)
+- **State Translation** - a human-readable translation of that code (e.g.
+  `opening`)
 
 ## Supported hardware
 

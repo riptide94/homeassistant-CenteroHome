@@ -22,7 +22,7 @@ async def test_preset_position_numbers_created(
 
     await setup_integration(hass, config_entry)
 
-    for key in ("favorite_position", "vent_position"):
+    for key in ("position_favorite", "position_vent"):
         entity_id = find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_{key}")
 
         #
@@ -53,7 +53,7 @@ async def test_set_value_applies_immediately(
     favorite_number = find_entity_id(
         hass,
         "number",
-        f"{COVER_UNIQUE_ID}_favorite_position",
+        f"{COVER_UNIQUE_ID}_position_favorite",
     )
     await set_number(hass, favorite_number, 25)
 
@@ -91,7 +91,7 @@ async def test_value_restored_across_reload(
     favorite_number = find_entity_id(
         hass,
         "number",
-        f"{COVER_UNIQUE_ID}_favorite_position",
+        f"{COVER_UNIQUE_ID}_position_favorite",
     )
     await set_number(hass, favorite_number, 25)
 

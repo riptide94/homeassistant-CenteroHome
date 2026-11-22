@@ -1,27 +1,15 @@
 """The Centero integration."""
 
-import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.device_registry as dr
 
 from .api import CenteroAPI, CenteroApiError
 from .const import DOMAIN, LOGGER, PLATFORMS
 from .coordinator import CenteroCoordinator
-
-CONFIG_SCHEMA = vol.Schema({DOMAIN: cv.config_entry_only_config_schema(DOMAIN)}, extra=vol.ALLOW_EXTRA)
-
-
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the Centero component."""
-
-    return True
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -58,6 +46,7 @@ async def async_setup_entry(
     #
     coordinator = CenteroCoordinator(
         hass=hass,
+        config_entry=entry,
         api=api,
     )
 
@@ -90,7 +79,7 @@ async def async_setup_entry(
 
     gateway_mac = gateway_info.get("mac", host)
 
-    device_registry.async_get_or_create(
+    gateway_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, gateway_mac)},
         manufacturer="Elero",
@@ -108,6 +97,11 @@ async def async_setup_entry(
         "api": api,
         "coordinator": coordinator,
         "gateway_info": gateway_info,
+        #
+        # Registry id of the gateway device; cover devices link to it
+        # via via_device_id.
+        #
+        "gateway_device_id": gateway_device.id,
     }
 
     #

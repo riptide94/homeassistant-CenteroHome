@@ -14,10 +14,14 @@ from .common import setup_integration
 
 EXPECTED_ICONS = {
     "number": {
-        "open_time": "mdi:clock-out",
-        "close_time": "mdi:clock-in",
-        "favorite_position": "mdi:star",
-        "vent_position": "mdi:fan",
+        "time_open": "mdi:clock-out",
+        "time_close": "mdi:clock-in",
+        "position_favorite": "mdi:window-shutter-settings",
+        "position_vent": "mdi:window-shutter-cog",
+    },
+    "sensor": {
+        "state_code": "mdi:hexadecimal",
+        "state_translation": "mdi:label",
     },
     "switch": {
         "silent_drive": "mdi:volume-mute",

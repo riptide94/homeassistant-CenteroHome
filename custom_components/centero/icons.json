@@ -1,17 +1,25 @@
 {
   "entity": {
     "number": {
-      "open_time": {
+      "time_open": {
         "default": "mdi:clock-out"
       },
-      "close_time": {
+      "time_close": {
         "default": "mdi:clock-in"
       },
-      "favorite_position": {
-        "default": "mdi:star"
+      "position_favorite": {
+        "default": "mdi:window-shutter-settings"
       },
-      "vent_position": {
-        "default": "mdi:fan"
+      "position_vent": {
+        "default": "mdi:window-shutter-cog"
+      }
+    },
+    "sensor": {
+      "state_code": {
+        "default": "mdi:hexadecimal"
+      },
+      "state_translation": {
+        "default": "mdi:label"
       }
     },
     "switch": {

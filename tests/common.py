@@ -34,6 +34,29 @@ class MockCenteroAPI:
         self.state = STATE_CLOSED
         self.sent_commands: list[tuple[str, str]] = []
 
+        #
+        # The motor's real state when the gateway's cache is stale
+        # (None: the cache is accurate). Like the real gateway, a
+        # RefreshSC returns it and writes it into the cache.
+        #
+        self.radio_state: str | None = None
+        self.refreshed: list[str] = []
+
+        #
+        # Additional covers (adr -> state) for multi-cover tests.
+        #
+        self.other_covers: dict[str, str] = {}
+
+    def _cover(self, adr: str) -> dict:
+        """Return a GetStates/RefreshSC record for a cover."""
+
+        if adr == MOCK_ADR:
+            sid, state = MOCK_SID, self.state
+        else:
+            sid, state = f"S{adr}", self.other_covers[adr]
+
+        return {"type": "ER", "sid": sid, "adr": adr, "state": state}
+
     async def get_info(self) -> dict:
         """Return gateway information."""
 
@@ -51,26 +74,20 @@ class MockCenteroAPI:
 
         return {
             "XC_SUC": [
-                {
-                    "type": "ER",
-                    "sid": MOCK_SID,
-                    "adr": MOCK_ADR,
-                    "state": self.state,
-                }
+                self._cover(adr) for adr in [MOCK_ADR, *self.other_covers]
             ]
         }
 
     async def refresh_state(self, address: str) -> dict:
         """Return the radio-queried state of a single device."""
 
-        return {
-            "XC_SUC": {
-                "type": "ER",
-                "sid": MOCK_SID,
-                "adr": address,
-                "state": self.state,
-            }
-        }
+        self.refreshed.append(address)
+
+        if address == MOCK_ADR and self.radio_state is not None:
+            self.state = self.radio_state
+            self.radio_state = None
+
+        return {"XC_SUC": self._cover(address)}
 
     async def send_command(self, address: str, command: str) -> None:
         """Record a sent command."""

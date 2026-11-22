@@ -1,15 +1,23 @@
 """DataUpdateCoordinator for Centero."""
 
+from dataclasses import dataclass
+from datetime import datetime
+from functools import partial
 import time
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import CALLBACK_TYPE, HassJob, HomeAssistant
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CenteroAPI, CenteroApiError
 from .const import (
+    COMMAND_STOP,
     FAST_POLL_INTERVAL,
     LOGGER,
+    MOVEMENT_TIMEOUT_DEFAULT_SECONDS,
+    MOVEMENT_TIMEOUT_MARGIN_SECONDS,
     MOVING_STATES,
     OPENING_STATES,
     POLL_INTERVAL,
@@ -26,12 +34,21 @@ from .const import (
 from .travel_calculator import TravelCalculator
 
 
+@dataclass
+class _PendingPositionStop:
+    """A scheduled stop command ending a timed set-position run."""
+
+    opening: bool
+    cancel: CALLBACK_TYPE | None = None
+
+
 class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Coordinate Centero state updates."""
 
     def __init__(
         self,
         hass: HomeAssistant,
+        config_entry: ConfigEntry,
         api: CenteroAPI,
     ) -> None:
         """Initialize the coordinator."""
@@ -39,6 +56,7 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         super().__init__(
             hass,
             LOGGER,
+            config_entry=config_entry,
             name="Centero",
             update_interval=POLL_INTERVAL,
         )
@@ -58,6 +76,15 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         #
         self._optimistic_states: dict[str, dict[str, Any]] = {}
         self._moving_devices: set[str] = set()
+
+        #
+        # Monotonic timestamp at which each device's current movement
+        # started (HA command, or first moving report), used to detect
+        # moving states the gateway has kept cached for too long.
+        #
+        # Key: adr
+        #
+        self._moving_since: dict[str, float] = {}
 
         #
         # Time-based position estimation.
@@ -81,6 +108,15 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._refresh_counter = 0
 
         #
+        # Covers not yet radio-queried since startup. Changes made
+        # while HA was not running (e.g. via a wall switch) are not in
+        # the gateway's cache, so every cover is queried once, at the
+        # fast poll interval, before the regular round-robin takes
+        # over. None until the first GetStates reveals the covers.
+        #
+        self._initial_refresh_pending: set[str] | None = None
+
+        #
         # Silent-drive (quiet/slow travel) preference per device, set via
         # the "Silent drive" switch. Not exposed anywhere by the gateway
         # API; purely a user-set preference.
@@ -91,11 +127,18 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         #
         # User-configured positions of the motor-programmed presets,
-        # set via the "Favorite position" / "Vent position" numbers.
+        # set via the "Position favorite" / "Position vent" numbers.
         #
         # Key: adr, then preset state (STATE_INTERMEDIATE / STATE_VENT)
         #
         self._preset_positions: dict[str, dict[str, float]] = {}
+
+        #
+        # Pending timed stops for set_cover_position runs.
+        #
+        # Key: adr
+        #
+        self._position_stops: dict[str, _PendingPositionStop] = {}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch data from the gateway."""
@@ -141,6 +184,15 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 )
 
         #
+        # Covers that vanished from the gateway must not keep the
+        # sweep (and with it the fast poll interval) running.
+        #
+        if self._initial_refresh_pending is None:
+            self._initial_refresh_pending = set(devices)
+        else:
+            self._initial_refresh_pending &= set(devices)
+
+        #
         # The RefreshSC result is at least as fresh as the cached
         # GetStates snapshot; make sure it wins.
         #
@@ -173,13 +225,17 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             else:
                 actual.update(optimistic)
 
+        now = time.monotonic()
+
         for adr, device in devices.items():
             state = device["state"]
 
             if state in MOVING_STATES:
                 self._moving_devices.add(adr)
+                self._moving_since.setdefault(adr, now)
             else:
                 self._moving_devices.discard(adr)
+                self._moving_since.pop(adr, None)
 
         self._reconcile_travel_calculators(devices)
 
@@ -190,38 +246,58 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def _pick_refresh_adr(self) -> str | None:
         """Choose which device to radio-query this cycle, if any.
 
-        Externally-moving covers (moving state without an optimistic
-        override, i.e. not commanded through HA) take priority - the
-        gateway will never notice their progress on its own. When
-        everything is idle, cycle through all covers to bound the
-        staleness of physically-triggered changes. While only
-        HA-commanded movement is going on, keep the radio clear.
+        Covers with an unconfirmed movement take priority: externally
+        moving ones (moving state without an optimistic override, i.e.
+        not commanded through HA) - the gateway will never notice their
+        progress on its own - and HA-commanded ones that have been
+        reported moving for longer than they should take, whose end of
+        travel the gateway has likely missed. While only HA-commanded
+        movement within its expected duration is going on, keep the
+        radio clear. Otherwise, after startup, query every cover once;
+        then cycle through all covers to bound the staleness of
+        physically-triggered changes.
         """
 
         if not self.data:
             return None
 
-        external = [
+        now = time.monotonic()
+
+        unconfirmed = [
             adr
             for adr in sorted(self._moving_devices)
             if adr not in self._optimistic_states
+            or self._is_movement_overdue(adr, now)
         ]
 
-        if external:
-            candidates = external
-            reason = "externally moving"
-        elif not self._moving_devices:
-            candidates = sorted(self.data)
-            reason = "idle round-robin"
-        else:
+        initial = sorted(self._initial_refresh_pending or ())
+
+        if unconfirmed:
+            candidates = unconfirmed
+            reason = "unconfirmed movement"
+        elif self._moving_devices:
             LOGGER.debug(
                 "Skipping RefreshSC, HA-commanded movement in progress: %s",
                 sorted(self._moving_devices),
             )
             return None
+        elif initial:
+            candidates = initial[:1]
+            reason = "initial sweep"
+        else:
+            candidates = sorted(self.data)
+            reason = "idle round-robin"
 
         adr = candidates[self._refresh_counter % len(candidates)]
         self._refresh_counter += 1
+
+        #
+        # Any query counts towards the initial sweep. Discard even if
+        # the query fails, so an unreachable motor cannot keep the
+        # fast poll interval running.
+        #
+        if self._initial_refresh_pending:
+            self._initial_refresh_pending.discard(adr)
 
         LOGGER.debug(
             "RefreshSC target adr=%s (%s, %d candidate(s))",
@@ -231,6 +307,32 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
 
         return adr
+
+    def _is_movement_overdue(self, adr: str, now: float) -> bool:
+        """Return whether a movement has outlasted its expected duration."""
+
+        since = self._moving_since.get(adr)
+
+        return since is not None and now - since > self._movement_timeout(adr)
+
+    def _movement_timeout(self, adr: str) -> float:
+        """Return how long a movement may be reported before re-checking it."""
+
+        calc = self._travel_calculators.get(adr)
+
+        if calc is None:
+            return MOVEMENT_TIMEOUT_DEFAULT_SECONDS
+
+        state = self._optimistic_states.get(adr, {}).get("state")
+
+        travel_time = (
+            calc.travel_time_up if state in OPENING_STATES else calc.travel_time_down
+        )
+
+        if not travel_time:
+            return MOVEMENT_TIMEOUT_DEFAULT_SECONDS
+
+        return travel_time + MOVEMENT_TIMEOUT_MARGIN_SECONDS
 
     async def _async_refresh_one_device(self) -> dict[str, Any] | None:
         """Radio-query one device and return its fresh record, if any."""
@@ -291,7 +393,19 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 if self._within_stop_grace(adr):
                     continue
 
-                if state in OPENING_STATES:
+                opening = state in OPENING_STATES
+
+                #
+                # The cover was reversed externally (e.g. via a remote)
+                # while a timed set-position stop was pending; the stop
+                # no longer applies to this movement.
+                #
+                pending = self._position_stops.get(adr)
+
+                if pending is not None and pending.opening != opening:
+                    self.cancel_position_stop(adr)
+
+                if opening:
                     calc.start_travel_up()
                 else:
                     calc.start_travel_down()
@@ -299,8 +413,14 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 continue
 
             #
-            # Any non-moving state means travel has ended; freeze a
-            # still-running estimate before anything else.
+            # Any non-moving state means travel has ended (end stop
+            # reached early, remote stop, blocking, ...); a pending
+            # timed stop must not fire into a later movement.
+            #
+            self.cancel_position_stop(adr)
+
+            #
+            # Freeze a still-running estimate before anything else.
             #
             if calc.is_traveling:
                 calc.stop()
@@ -351,12 +471,24 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     ) -> None:
         """Set an optimistic state for a device."""
 
+        #
+        # A new commanded movement supersedes any pending timed stop;
+        # set_cover_position re-schedules its own stop afterwards.
+        #
+        self.cancel_position_stop(adr)
+
         self._optimistic_states[adr] = {
             "state": state,
         }
 
         if state in MOVING_STATES:
             self._moving_devices.add(adr)
+
+            #
+            # A new command starts a new movement, with a fresh
+            # expected duration.
+            #
+            self._moving_since[adr] = time.monotonic()
 
             #
             # A new commanded movement supersedes any recent stop.
@@ -384,10 +516,13 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     ) -> None:
         """Clear an optimistic state."""
 
+        self.cancel_position_stop(adr)
+
         if adr in self._optimistic_states:
             self._optimistic_states.pop(adr)
 
         self._moving_devices.discard(adr)
+        self._moving_since.pop(adr, None)
 
         self._update_poll_interval()
 
@@ -448,10 +583,112 @@ class CenteroCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         self.async_update_listeners()
 
+    def schedule_position_stop(self, adr: str, opening: bool, delay: float) -> None:
+        """Schedule the stop command that ends a timed set-position run."""
+
+        self.cancel_position_stop(adr)
+
+        pending = _PendingPositionStop(opening=opening)
+
+        #
+        # cancel_on_shutdown: when HA shuts down mid-run the stop is
+        # dropped and the motor runs to its end stop, matching the
+        # restart-mid-travel behavior.
+        #
+        pending.cancel = async_call_later(
+            self.hass,
+            delay,
+            HassJob(
+                partial(self._async_position_stop_fired, adr, pending),
+                f"centero position stop {adr}",
+                cancel_on_shutdown=True,
+            ),
+        )
+
+        self._position_stops[adr] = pending
+
+        LOGGER.debug(
+            "Scheduled position stop for adr=%s in %.2fs (opening=%s)",
+            adr,
+            delay,
+            opening,
+        )
+
+    def cancel_position_stop(self, adr: str) -> None:
+        """Cancel a pending timed set-position stop, if any."""
+
+        pending = self._position_stops.pop(adr, None)
+
+        if pending is None:
+            return
+
+        if pending.cancel is not None:
+            pending.cancel()
+
+        LOGGER.debug("Cancelled pending position stop for adr=%s", adr)
+
+    async def _async_position_stop_fired(
+        self,
+        adr: str,
+        pending: _PendingPositionStop,
+        _fired_at: datetime,
+    ) -> None:
+        """Send the stop that ends a timed set-position run."""
+
+        #
+        # The loop can fire the timer in the same iteration as a
+        # cancel, and a new run may have been scheduled since; only
+        # act if this is still the registered pending stop.
+        #
+        if self._position_stops.get(adr) is not pending:
+            return
+
+        del self._position_stops[adr]
+
+        LOGGER.debug("Timed position stop for adr=%s", adr)
+
+        try:
+            await self.api.send_command(adr, COMMAND_STOP)
+
+        except CenteroApiError as err:
+            #
+            # The motor keeps moving; leave the estimate travelling so
+            # it stays consistent with reality, and let the reconcile
+            # pass recalibrate at the end stop.
+            #
+            LOGGER.warning(
+                "Failed to send timed position stop for adr=%s: %s",
+                adr,
+                err,
+            )
+            return
+
+        self.clear_optimistic_state(adr)
+
+        #
+        # Freeze only after the stop command's round-trip, so the
+        # estimate absorbs most of the command latency.
+        #
+        self.stop_travel(adr)
+
+        await self.async_request_refresh()
+
+    async def async_shutdown(self) -> None:
+        """Cancel pending position stops and shut down the coordinator."""
+
+        for adr in list(self._position_stops):
+            self.cancel_position_stop(adr)
+
+        await super().async_shutdown()
+
     def _update_poll_interval(self) -> None:
         """Update polling interval based on movement state."""
 
-        new_interval = FAST_POLL_INTERVAL if self._moving_devices else POLL_INTERVAL
+        new_interval = (
+            FAST_POLL_INTERVAL
+            if self._moving_devices or self._initial_refresh_pending
+            else POLL_INTERVAL
+        )
 
         if self.update_interval != new_interval:
             LOGGER.debug(

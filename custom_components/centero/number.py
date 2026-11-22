@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 
 from .const import (
     DOMAIN,
@@ -79,7 +80,7 @@ class CenteroCoverConfigNumber(CoordinatorEntity[CenteroCoordinator], RestoreNum
         # translated name silently degrades to the bare device name
         # when the translation is not available at registration.
         #
-        self.entity_id = f"number.{cover_unique}_{translation_key}"
+        self.entity_id = f"number.{slugify(cover_unique)}_{translation_key}"
 
         self._attr_native_value: float | None = None
 
@@ -87,16 +88,15 @@ class CenteroCoverConfigNumber(CoordinatorEntity[CenteroCoordinator], RestoreNum
     def device_info(self) -> DeviceInfo:
         """Return device information, matching the cover's device."""
 
-        gateway_info = self.hass.data[DOMAIN][self._entry.entry_id]["gateway_info"]
+        gateway_device_id = self.hass.data[DOMAIN][self._entry.entry_id][
+            "gateway_device_id"
+        ]
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._cover_unique_id)},
             manufacturer="Elero",
             model="Centero controlled cover",
-            via_device=(
-                DOMAIN,
-                gateway_info.get("mac", self._entry.entry_id),
-            ),
+            via_device_id=gateway_device_id,
         )
 
     async def async_added_to_hass(self) -> None:
@@ -152,12 +152,18 @@ class CenteroCoverOpenTime(CenteroTravelTimeNumber):
     ) -> None:
         """Initialize the number."""
 
-        super().__init__(entry, coordinator, device, "open_time")
+        super().__init__(entry, coordinator, device, "time_open")
 
     def _apply_value(self, value: float | None) -> None:
-        """Push the value into the shared travel calculator."""
+        """Push the value into the shared travel calculator.
+
+        Listeners are notified so covers re-evaluate go-to-position
+        support right away instead of at the next poll.
+        """
 
         self.coordinator.get_travel_calculator(self._adr).set_travel_time_up(value)
+
+        self.coordinator.async_update_listeners()
 
 
 class CenteroCoverCloseTime(CenteroTravelTimeNumber):
@@ -171,12 +177,18 @@ class CenteroCoverCloseTime(CenteroTravelTimeNumber):
     ) -> None:
         """Initialize the number."""
 
-        super().__init__(entry, coordinator, device, "close_time")
+        super().__init__(entry, coordinator, device, "time_close")
 
     def _apply_value(self, value: float | None) -> None:
-        """Push the value into the shared travel calculator."""
+        """Push the value into the shared travel calculator.
+
+        Listeners are notified so covers re-evaluate go-to-position
+        support right away instead of at the next poll.
+        """
 
         self.coordinator.get_travel_calculator(self._adr).set_travel_time_down(value)
+
+        self.coordinator.async_update_listeners()
 
 
 class CenteroPresetPositionNumber(CenteroCoverConfigNumber):
@@ -230,7 +242,7 @@ class CenteroCoverFavoritePosition(CenteroPresetPositionNumber):
             entry,
             coordinator,
             device,
-            "favorite_position",
+            "position_favorite",
             STATE_INTERMEDIATE,
         )
 
@@ -250,6 +262,6 @@ class CenteroCoverVentPosition(CenteroPresetPositionNumber):
             entry,
             coordinator,
             device,
-            "vent_position",
+            "position_vent",
             STATE_VENT,
         )

@@ -7,6 +7,9 @@ on:
   pull_request:
   schedule:
     - cron: "0 4 * * 1"
+  # GitHub disables scheduled runs after 60 days without repo activity;
+  # allows re-running validation by hand.
+  workflow_dispatch:
 
 jobs:
   hassfest:

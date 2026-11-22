@@ -18,17 +18,25 @@
   },
   "entity": {
     "number": {
-      "open_time": {
-        "name": "Open time"
+      "time_open": {
+        "name": "Time open"
       },
-      "close_time": {
-        "name": "Close time"
+      "time_close": {
+        "name": "Time close"
       },
-      "favorite_position": {
-        "name": "Favorite position"
+      "position_favorite": {
+        "name": "Position favorite"
       },
-      "vent_position": {
-        "name": "Vent position"
+      "position_vent": {
+        "name": "Position vent"
+      }
+    },
+    "sensor": {
+      "state_code": {
+        "name": "State code"
+      },
+      "state_translation": {
+        "name": "State translation"
       }
     },
     "switch": {

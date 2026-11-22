@@ -2,13 +2,15 @@
 
 from typing import Any
 
-from homeassistant.components.cover import CoverEntity, CoverEntityFeature
+from homeassistant.components.cover import ATTR_POSITION, CoverEntity, CoverEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 
 from .const import (
     CLOSING_STATES,
@@ -26,6 +28,7 @@ from .const import (
     OPENING_STATES,
     PRESET_POSITION_DEFAULT,
     PRESET_STATES,
+    SET_POSITION_MIN_DELTA,
     STATE_BOTTOM_INTERMEDIATE,
     STATE_CLOSED,
     STATE_CLOSING,
@@ -101,27 +104,39 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
         # would duplicate the device name (which is the same as the
         # entity name) into cover.elero_sid01_adr03_elero_sid01_adr03.
         #
-        self.entity_id = f"cover.{unique}"
+        self.entity_id = f"cover.{slugify(unique)}"
 
-        self._attr_supported_features = (
+    @property
+    def supported_features(self) -> CoverEntityFeature:
+        """Return supported features.
+
+        SET_POSITION requires configured drive times; without them the
+        integration cannot compute when to stop the motor.
+        """
+
+        features = (
             CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
         )
+
+        if self.coordinator.get_travel_calculator(self._adr).is_configured:
+            features |= CoverEntityFeature.SET_POSITION
+
+        return features
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
 
-        gateway_info = self.hass.data[DOMAIN][self._entry.entry_id]["gateway_info"]
+        gateway_device_id = self.hass.data[DOMAIN][self._entry.entry_id][
+            "gateway_device_id"
+        ]
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Elero",
             model="Centero controlled cover",
             name=self._attr_name,
-            via_device=(
-                DOMAIN,
-                gateway_info.get("mac", self._entry.entry_id),
-            ),
+            via_device_id=gateway_device_id,
         )
 
     @property
@@ -293,6 +308,81 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
 
         await self.coordinator.async_request_refresh()
 
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
+        """Move the cover to a specific position using a timed stop.
+
+        The gateway has no native go-to-position command, so the cover
+        is started in the right direction and stopped when the
+        time-based position estimate reaches the target.
+        """
+
+        target: int = kwargs[ATTR_POSITION]
+
+        #
+        # Full travel needs no timed stop: the motor halts at its end
+        # stop and the confirmed endpoint recalibrates the estimate.
+        #
+        if target >= 100:
+            await self.async_open_cover()
+            return
+
+        if target <= 0:
+            await self.async_close_cover()
+            return
+
+        calc = self.coordinator.get_travel_calculator(self._adr)
+
+        current = calc.current_position()
+
+        if not calc.is_configured or current is None:
+            raise HomeAssistantError(
+                f"Current position of {self.entity_id} is unknown; "
+                "fully open or close the cover once to calibrate"
+            )
+
+        delta = target - current
+
+        if abs(delta) < SET_POSITION_MIN_DELTA:
+            LOGGER.debug(
+                "Cover SID=%s ADR=%s already at %s%%, not moving",
+                self._sid,
+                self._adr,
+                target,
+            )
+            return
+
+        silent = self.coordinator.is_silent_drive(self._adr)
+        opening = delta > 0
+
+        if opening:
+            duration = (delta / 100) * calc.travel_time_up
+            command = COMMAND_UP_SILENT if silent else COMMAND_UP
+            optimistic = STATE_OPENING
+        else:
+            duration = (-delta / 100) * calc.travel_time_down
+            command = COMMAND_DOWN_SILENT if silent else COMMAND_DOWN
+            optimistic = STATE_CLOSING
+
+        LOGGER.debug(
+            "Setting cover SID=%s ADR=%s to %s%% (current=%.1f, %s for %.2fs, "
+            "silent=%s)",
+            self._sid,
+            self._adr,
+            target,
+            current,
+            "opening" if opening else "closing",
+            duration,
+            silent,
+        )
+
+        await self.coordinator.api.send_command(self._adr, command)
+
+        self.coordinator.set_optimistic_state(self._adr, optimistic)
+
+        self.coordinator.schedule_position_stop(self._adr, opening, duration)
+
+        await self.coordinator.async_request_refresh()
+
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
 
@@ -333,6 +423,12 @@ class CenteroCover(CoordinatorEntity[CenteroCoordinator], CoverEntity):
             self._adr,
             COMMAND_VENT,
         )
+
+        #
+        # A pending timed set-position stop must not halt the preset
+        # transit.
+        #
+        self.coordinator.cancel_position_stop(self._adr)
 
         #
         # We don't know which way the preset lies, but the gateway

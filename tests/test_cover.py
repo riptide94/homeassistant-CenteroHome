@@ -58,7 +58,7 @@ async def test_vent_state_uses_configured_position(
 
     await setup_integration(hass, config_entry)
 
-    vent_number = find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_vent_position")
+    vent_number = find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_position_vent")
     await set_number(hass, vent_number, 10)
 
     cover_id = find_entity_id(hass, "cover", COVER_UNIQUE_ID)
@@ -81,7 +81,7 @@ async def test_favorite_position_zero_still_reads_open(
     favorite_number = find_entity_id(
         hass,
         "number",
-        f"{COVER_UNIQUE_ID}_favorite_position",
+        f"{COVER_UNIQUE_ID}_position_favorite",
     )
     await set_number(hass, favorite_number, 0)
 
@@ -142,12 +142,12 @@ async def test_vent_service_tracks_position_through_transit(
 
     await set_number(
         hass,
-        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_open_time"),
+        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_time_open"),
         10,
     )
     await set_number(
         hass,
-        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_close_time"),
+        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_time_close"),
         10,
     )
 
@@ -205,17 +205,17 @@ async def test_configured_position_overrides_tracked_estimate(
 
     await set_number(
         hass,
-        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_open_time"),
+        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_time_open"),
         10,
     )
     await set_number(
         hass,
-        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_close_time"),
+        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_time_close"),
         10,
     )
     await set_number(
         hass,
-        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_vent_position"),
+        find_entity_id(hass, "number", f"{COVER_UNIQUE_ID}_position_vent"),
         60,
     )
 

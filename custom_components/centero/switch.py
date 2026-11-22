@@ -10,6 +10,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 
 from .const import DOMAIN, LOGGER
 from .coordinator import CenteroCoordinator
@@ -66,7 +67,7 @@ class CenteroSilentDriveSwitch(
         # translated name silently degrades to the bare device name
         # when the translation is not available at registration.
         #
-        self.entity_id = f"switch.{cover_unique}_silent_drive"
+        self.entity_id = f"switch.{slugify(cover_unique)}_silent_drive"
 
         self._attr_is_on = False
 
@@ -74,16 +75,15 @@ class CenteroSilentDriveSwitch(
     def device_info(self) -> DeviceInfo:
         """Return device information, matching the cover's device."""
 
-        gateway_info = self.hass.data[DOMAIN][self._entry.entry_id]["gateway_info"]
+        gateway_device_id = self.hass.data[DOMAIN][self._entry.entry_id][
+            "gateway_device_id"
+        ]
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._cover_unique_id)},
             manufacturer="Elero",
             model="Centero controlled cover",
-            via_device=(
-                DOMAIN,
-                gateway_info.get("mac", self._entry.entry_id),
-            ),
+            via_device_id=gateway_device_id,
         )
 
     async def async_added_to_hass(self) -> None:

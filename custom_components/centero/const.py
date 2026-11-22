@@ -7,7 +7,7 @@ DOMAIN = "centero"
 
 LOGGER = logging.getLogger(__package__)
 
-PLATFORMS = ["cover", "number", "switch"]
+PLATFORMS = ["cover", "number", "sensor", "switch"]
 
 DEFAULT_TIMEOUT = 10
 
@@ -34,6 +34,25 @@ PRESET_POSITION_DEFAULT = 50
 # they don't restart the travel estimate.
 #
 TRAVEL_STOP_GRACE_SECONDS = 5.0
+
+#
+# The gateway sometimes misses a motor's end-of-travel report (seen
+# when several covers are commanded at once) and then keeps the moving
+# state cached indefinitely, until something radio-queries the motor.
+# An HA-commanded movement still reported as moving after the
+# configured drive time plus this margin - or after the default when no
+# drive time is configured - is therefore re-checked via RefreshSC.
+#
+MOVEMENT_TIMEOUT_MARGIN_SECONDS = 10.0
+MOVEMENT_TIMEOUT_DEFAULT_SECONDS = 120.0
+
+#
+# Ignore set_cover_position requests closer to the current estimate
+# than this (in position units). The rounded UI position cannot
+# distinguish them, and the resulting travel would be shorter than
+# the command latency to the gateway.
+#
+SET_POSITION_MIN_DELTA = 1.0
 
 #
 # Cover states reported by the gateway for ER devices.
@@ -65,7 +84,7 @@ MOVING_STATES = OPENING_STATES | CLOSING_STATES
 #
 # Stationary at a user-defined preset. The gateway never reports where
 # the preset lies; the user can configure it per cover via the
-# "Favorite position" / "Vent position" number entities.
+# "Position favorite" / "Position vent" number entities.
 #
 PRESET_STATES = {STATE_INTERMEDIATE, STATE_VENT}
 
